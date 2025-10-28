@@ -230,6 +230,11 @@ export function emitContentStreamFromFullIR(root) {
       }
 
       case "op": {
+        // Skip transform operators - we use absolute CTMs on image nodes instead
+        if (node.op === "transform") {
+          s += `% transform operator skipped (using absolute CTMs)\n`;
+          break;
+        }
         const t = tok[node.op];
         if (!t) {
           s += `% unsupported op ${node.op}\n`;
