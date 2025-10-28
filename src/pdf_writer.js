@@ -230,11 +230,8 @@ export function emitContentStreamFromFullIR(root) {
       }
 
       case "op": {
-        // Skip transform operators - we use absolute CTMs on image nodes instead
-        if (node.op === "transform") {
-          s += `% transform operator skipped (using absolute CTMs)\n`;
-          break;
-        }
+        // Skip transform operators - images use absolute CTMs instead
+        if (node.op === "transform") break;
         const t = tok[node.op];
         if (!t) {
           s += `% unsupported op ${node.op}\n`;
@@ -323,23 +320,11 @@ function buildXObjectsFromAssets(assets, startId = 3) {
   const objects = [];
   const map = {};
   let nextId = startId;
-  
-  // Diagnostic: log asset processing
-  const assetKeys = Object.keys(assets || {});
-  if (assetKeys.length === 0) {
-    console.warn('[PDF Export] No XObject assets provided to buildXObjectsFromAssets');
-  }
-  
   for (const [name, spec] of Object.entries(assets || {})) {
-    if (!spec?.dataUrl) {
-      console.warn(`[PDF Export] Asset '${name}' missing dataUrl property`);
-      continue;
-    }
+    if (!spec?.dataUrl) continue;
     const { mime, bytes } = dataUrlToBytes(spec.dataUrl);
-    if (mime.toLowerCase() !== "image/jpeg") {
-      console.warn(`[PDF Export] Asset '${name}' is ${mime}, not image/jpeg - skipping`);
-      continue; // demo: JPEG only
-    }
+    // Use case-insensitive comparison for MIME type
+    if (mime.toLowerCase() !== "image/jpeg") continue; // demo: JPEG only
     let W = spec.width,
       H = spec.height;
     if (!W || !H) {
@@ -373,14 +358,6 @@ function buildXObjectsFromAssets(assets, startId = 3) {
     buf.set(tail, head.length + bytes.length);
     objects.push({ id, bytes: buf });
   }
-  
-  // Diagnostic: log results
-  if (objects.length === 0 && assetKeys.length > 0) {
-    console.error('[PDF Export] No XObjects created despite having assets - all were filtered out');
-  } else if (objects.length > 0) {
-    console.log(`[PDF Export] Successfully created ${objects.length} XObject(s):`, Object.keys(map));
-  }
-  
   const dictStr = Object.keys(map).length
     ? `<< ${Object.entries(map)
         .map(([n, id]) => `/${n} ${id} 0 R`)
