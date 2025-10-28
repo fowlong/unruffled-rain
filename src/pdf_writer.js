@@ -550,7 +550,7 @@ function buildXrefStream(doc, headerVersion) {
 /Parent ${pagesId} 0 R
 /MediaBox [0 0 ${w} ${h}]
 /Resources ${resources}
-\ /Contents ${po.contentsId} 0 R
+/Contents ${po.contentsId} 0 R
 >>\n`
     );
   }
