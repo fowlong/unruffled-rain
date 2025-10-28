@@ -230,7 +230,8 @@ export function emitContentStreamFromFullIR(root) {
       }
 
       case "op": {
-        // Skip transform operators - images use absolute CTMs instead
+        // Skip transform operators to prevent double-transformation.
+        // Image nodes already have absolute CTMs applied within their q/Q blocks.
         if (node.op === "transform") break;
         const t = tok[node.op];
         if (!t) {
