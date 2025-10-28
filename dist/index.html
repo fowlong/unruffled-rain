@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>PDF Vector Editor — IR + Canvas + Export (1.4 / 1.7 / 2.0)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="/src/style.css" />
+    <script type="module" crossorigin src="/assets/index-DB2qRmvt.js"></script>
+  </head>
+  <body>
+    <header>
+      <h1>PDF Vector Editor</h1>
+      <div class="controls">
+        <label class="file">
+          <input type="file" id="fileInput" accept="application/pdf" />
+          <span>Choose PDF…</span>
+        </label>
+
+        <label
+          >Page:
+          <select id="pageSelect" disabled></select>
+        </label>
+
+        <label
+          >IR Mode:
+          <select id="irModeSelect">
+            <option value="full">Full Operator IR</option>
+            <option value="text">Text IR (simple)</option>
+          </select>
+        </label>
+
+        <label
+          >Export Mode:
+          <select id="exportModeSelect">
+            <option value="new">New PDF (safe)</option>
+            <option value="incremental">Incremental (beta)</option>
+          </select>
+        </label>
+
+        <label
+          >Output Version:
+          <select id="versionSelect">
+            <option value="2.0">PDF 2.0 (xref stream)</option>
+            <option value="1.7">PDF 1.7 (xref stream)</option>
+            <option value="1.4">PDF 1.4 (classic xref)</option>
+          </select>
+        </label>
+
+        <button id="exportBtn" disabled>Export Edited PDF</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="panel" id="domPanel">
+        <h2>Operator List (Flat)</h2>
+        <div class="panel-body"><pre id="tree"></pre></div>
+      </section>
+
+      <section class="panel" id="irPanel">
+        <h2>IR Editor</h2>
+        <div class="panel-body">
+          <p class="hint">
+            Edit the Full IR (JSON). Apply, then Export. Images must be provided
+            in <code>xobjects</code> (data URLs for now).
+          </p>
+          <textarea id="irTextarea" spellcheck="false"></textarea>
+          <div class="actions">
+            <button id="applyIrBtn" disabled>Apply IR edits</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" id="canvasPanel">
+        <h2>Canvas Preview (Vector)</h2>
+        <div class="panel-body">
+          <div class="canvasRow">
+            <canvas id="editorCanvas" width="612" height="792"></canvas>
+          </div>
+          <div class="actions small">
+            <label
+              >Zoom:
+              <input
+                type="range"
+                id="zoomSlider"
+                min="25"
+                max="300"
+                step="5"
+                value="100"
+              />
+              <span id="zoomLabel">100%</span>
+            </label>
+            <button id="rerenderBtn">Re-render</button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <small>
+        Vector-only: no raster background. Export re-emits content streams;
+        XObjects from <code>xobjects</code> assets; Fonts are aliased to Base14
+        (next: copy original resources).
+      </small>
+    </footer>
+
+  </body>
+</html>
