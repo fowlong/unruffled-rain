@@ -188,8 +188,13 @@ export function renderIRToCanvas({
 
         const im = assets?.[n.name];
         if (im && im._img) {
-          // paint image in 1x1 coords scaled by CTM
-          ctx.drawImage(im._img, 0, 0, 1, 1);
+          // PDF images are typically placed with a transform that has negative d (vertical flip).
+          // Since our canvas already has Y-flipped coordinates (line 19), we need to flip
+          // the image vertically when drawing to counteract the double flip.
+          ctx.save();
+          ctx.scale(1, -1); // flip vertically to counteract PDF's image coordinate system
+          ctx.drawImage(im._img, 0, -1, 1, 1); // draw at (0, -1) with height 1 due to flip
+          ctx.restore();
         } else {
           // placeholder rectangle so you can see where the image would be
           ctx.fillStyle = "#ddd";
