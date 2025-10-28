@@ -318,10 +318,23 @@ function buildXObjectsFromAssets(assets, startId = 3) {
   const objects = [];
   const map = {};
   let nextId = startId;
+  
+  // Diagnostic: log asset processing
+  const assetKeys = Object.keys(assets || {});
+  if (assetKeys.length === 0) {
+    console.warn('[PDF Export] No XObject assets provided to buildXObjectsFromAssets');
+  }
+  
   for (const [name, spec] of Object.entries(assets || {})) {
-    if (!spec?.dataUrl) continue;
+    if (!spec?.dataUrl) {
+      console.warn(`[PDF Export] Asset '${name}' missing dataUrl property`);
+      continue;
+    }
     const { mime, bytes } = dataUrlToBytes(spec.dataUrl);
-    if (mime !== "image/jpeg") continue; // demo: JPEG only
+    if (mime.toLowerCase() !== "image/jpeg") {
+      console.warn(`[PDF Export] Asset '${name}' is ${mime}, not image/jpeg - skipping`);
+      continue; // demo: JPEG only
+    }
     let W = spec.width,
       H = spec.height;
     if (!W || !H) {
@@ -355,6 +368,14 @@ function buildXObjectsFromAssets(assets, startId = 3) {
     buf.set(tail, head.length + bytes.length);
     objects.push({ id, bytes: buf });
   }
+  
+  // Diagnostic: log results
+  if (objects.length === 0 && assetKeys.length > 0) {
+    console.error('[PDF Export] No XObjects created despite having assets - all were filtered out');
+  } else if (objects.length > 0) {
+    console.log(`[PDF Export] Successfully created ${objects.length} XObject(s):`, Object.keys(map));
+  }
+  
   const dictStr = Object.keys(map).length
     ? `<< ${Object.entries(map)
         .map(([n, id]) => `/${n} ${id} 0 R`)
