@@ -142,11 +142,45 @@ export function emitContentStreamFromFullIR(root) {
     showSpacedText: "TJ",
   };
 
+  // Track CTM to handle images with absolute positioning
+  let ctm = [1, 0, 0, 1, 0, 0];
+  const ctmStack = [];
+  
+  function mulCTM(a, b) {
+    return [
+      a[0] * b[0] + a[2] * b[1],
+      a[1] * b[0] + a[3] * b[1],
+      a[0] * b[2] + a[2] * b[3],
+      a[1] * b[2] + a[3] * b[3],
+      a[0] * b[4] + a[2] * b[5] + a[4],
+      a[1] * b[4] + a[3] * b[5] + a[5],
+    ];
+  }
+  
+  function inverseCTM(m) {
+    const [a, b, c, d, e, f] = m;
+    const det = a * d - b * c;
+    if (Math.abs(det) < 1e-10) {
+      // Singular matrix, return identity
+      return [1, 0, 0, 1, 0, 0];
+    }
+    return [
+      d / det,
+      -b / det,
+      -c / det,
+      a / det,
+      (c * f - d * e) / det,
+      (b * e - a * f) / det,
+    ];
+  }
+
   function emitNode(node) {
     switch (node.type) {
       case "save":
         s += "q\n";
+        ctmStack.push(ctm.slice());
         (node.children || []).forEach(emitNode);
+        ctm = ctmStack.pop() || [1, 0, 0, 1, 0, 0];
         s += "Q\n";
         break;
 
@@ -190,9 +224,16 @@ export function emitContentStreamFromFullIR(root) {
         break;
 
       case "image": {
-        // make image CTM self-contained to avoid compounding transforms
+        // Images have absolute CTM stored. To prevent compounding with current CTM,
+        // we need to reset to identity first, then apply the image's absolute CTM.
         s += "q\n";
         if (node.cm && Array.isArray(node.cm) && node.cm.length === 6) {
+          // Apply inverse of current CTM to reset to identity
+          const inv = inverseCTM(ctm);
+          if (inv[0] !== 1 || inv[1] !== 0 || inv[2] !== 0 || inv[3] !== 1 || inv[4] !== 0 || inv[5] !== 0) {
+            s += `${inv.map(num).join(" ")} cm\n`;
+          }
+          // Now apply the image's absolute CTM
           s += `${node.cm.map(num).join(" ")} cm\n`;
         }
         s += `${nameTok(node.name)} Do\nQ\n`;
@@ -236,6 +277,10 @@ export function emitContentStreamFromFullIR(root) {
           break;
         }
         s += `${argsAry(node.args).map(renderArg).join(" ")} ${t}\n`;
+        // Track CTM updates for transform operators
+        if (node.op === "transform" && Array.isArray(node.args) && node.args.length === 6) {
+          ctm = mulCTM(ctm, node.args);
+        }
         break;
       }
 
@@ -321,7 +366,8 @@ function buildXObjectsFromAssets(assets, startId = 3) {
   for (const [name, spec] of Object.entries(assets || {})) {
     if (!spec?.dataUrl) continue;
     const { mime, bytes } = dataUrlToBytes(spec.dataUrl);
-    if (mime !== "image/jpeg") continue; // demo: JPEG only
+    // Use case-insensitive comparison for MIME type
+    if (mime.toLowerCase() !== "image/jpeg") continue; // demo: JPEG only
     let W = spec.width,
       H = spec.height;
     if (!W || !H) {
