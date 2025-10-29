@@ -293,12 +293,7 @@ async function ensureImageAssetsForPage(page, fullIR, scale = HARVEST_SCALE) {
     sub.height = sh;
     const sctx = sub.getContext("2d");
 
-    // pdf.js renders images correctly oriented (it handles the CTM flip internally).
-    // But when we export to PDF, we'll use the original CTM which typically has negative d.
-    // So we need to flip the harvested image vertically so that the PDF's CTM will flip it back.
-    // We translate to (0, height) before flipping so the image stays within canvas bounds.
-    sctx.translate(0, sh);
-    sctx.scale(1, -1);
+    // Harvest the image as pdf.js renders it (correctly oriented)
     sctx.drawImage(c, sx, sy, sw, sh, 0, 0, sw, sh);
 
     try {
@@ -574,10 +569,6 @@ async function buildFullIRForPage(page) {
       case OPS.setTextMatrix:
       case OPS.setTextRise:
       case OPS.setTextRenderingMode:
-      case OPS.setFillRGBColor:
-      case OPS.setFillGray:
-      case OPS.setStrokeRGBColor:
-      case OPS.setStrokeGray:
         flushPath();
         stack.at(-1).children.push({ type: "op", op, args });
         break;
@@ -608,22 +599,44 @@ async function buildFullIRForPage(page) {
         break;
       }
 
-      // graphics state for paths
+      // graphics state for paths - also add to IR for text rendering
       case OPS.setStrokeRGBColor:
+        flushPath();
         gs.strokeColor = [args[0], args[1], args[2]];
         if (curPath) curPath.strokeColor = [...gs.strokeColor];
+        stack.at(-1).children.push({ type: "op", op, args });
         break;
       case OPS.setFillRGBColor:
+        flushPath();
         gs.fillColor = [args[0], args[1], args[2]];
         if (curPath) curPath.fillColor = [...gs.fillColor];
+        stack.at(-1).children.push({ type: "op", op, args });
         break;
       case OPS.setStrokeGray:
+        flushPath();
         gs.strokeColor = [args[0], args[0], args[0]];
         if (curPath) curPath.strokeColor = [...gs.strokeColor];
+        stack.at(-1).children.push({ type: "op", op, args });
         break;
       case OPS.setFillGray:
+        flushPath();
         gs.fillColor = [args[0], args[0], args[0]];
         if (curPath) curPath.fillColor = [...gs.fillColor];
+        stack.at(-1).children.push({ type: "op", op, args });
+        break;
+      case OPS.setStrokeCMYKColor:
+        flushPath();
+        // Store CMYK as-is for paths, and add to IR for text
+        gs.strokeColor = [args[0], args[1], args[2], args[3]];
+        if (curPath) curPath.strokeColor = [...gs.strokeColor];
+        stack.at(-1).children.push({ type: "op", op, args });
+        break;
+      case OPS.setFillCMYKColor:
+        flushPath();
+        // Store CMYK as-is for paths, and add to IR for text
+        gs.fillColor = [args[0], args[1], args[2], args[3]];
+        if (curPath) curPath.fillColor = [...gs.fillColor];
+        stack.at(-1).children.push({ type: "op", op, args });
         break;
       case OPS.setLineWidth:
         gs.lineWidth = args[0];

@@ -233,8 +233,10 @@ export function emitContentStreamFromFullIR(root) {
           if (inv[0] !== 1 || inv[1] !== 0 || inv[2] !== 0 || inv[3] !== 1 || inv[4] !== 0 || inv[5] !== 0) {
             s += `${inv.map(num).join(" ")} cm\n`;
           }
-          // Now apply the image's absolute CTM
-          s += `${node.cm.map(num).join(" ")} cm\n`;
+          // Apply the image's CTM, but flip the d component (vertical scale) to compensate
+          // for the fact that harvested images are in correct orientation (not pre-flipped)
+          const [a, b, c, d, e, f] = node.cm;
+          s += `${num(a)} ${num(b)} ${num(c)} ${num(-d)} ${num(e)} ${num(f)} cm\n`;
         }
         s += `${nameTok(node.name)} Do\nQ\n`;
         break;
@@ -298,6 +300,8 @@ export function emitContentStreamFromFullIR(root) {
    ====================================================================== */
 function makeTextStream(page) {
   let body = "BT\n";
+  // Ensure text has visible fill color (black)
+  body += "0 g\n";
   let lastSize = null;
   for (const t of page.textItems || []) {
     const s = t.str ?? "";

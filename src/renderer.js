@@ -189,7 +189,6 @@ export function renderIRToCanvas({
         const im = assets?.[n.name];
         if (im && im._img) {
           // Paint image in 1x1 coords scaled by CTM.
-          // The harvested image is stored flipped to compensate for PDF's typical negative-d CTM.
           ctx.drawImage(im._img, 0, 0, 1, 1);
         } else {
           // placeholder rectangle so you can see where the image would be
