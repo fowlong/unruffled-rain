@@ -156,23 +156,6 @@ export function emitContentStreamFromFullIR(root) {
       a[1] * b[4] + a[3] * b[5] + a[5],
     ];
   }
-  
-  function inverseCTM(m) {
-    const [a, b, c, d, e, f] = m;
-    const det = a * d - b * c;
-    if (Math.abs(det) < 1e-10) {
-      // Singular matrix, return identity
-      return [1, 0, 0, 1, 0, 0];
-    }
-    return [
-      d / det,
-      -b / det,
-      -c / det,
-      a / det,
-      (c * f - d * e) / det,
-      (b * e - a * f) / det,
-    ];
-  }
 
   function emitNode(node) {
     switch (node.type) {
@@ -224,16 +207,9 @@ export function emitContentStreamFromFullIR(root) {
         break;
 
       case "image": {
-        // Images have absolute CTM stored. To prevent compounding with current CTM,
-        // we need to reset to identity first, then apply the image's absolute CTM.
+        // Images have absolute CTM stored. Simply save state, apply the CTM, draw, and restore.
         s += "q\n";
         if (node.cm && Array.isArray(node.cm) && node.cm.length === 6) {
-          // Apply inverse of current CTM to reset to identity
-          const inv = inverseCTM(ctm);
-          if (inv[0] !== 1 || inv[1] !== 0 || inv[2] !== 0 || inv[3] !== 1 || inv[4] !== 0 || inv[5] !== 0) {
-            s += `${inv.map(num).join(" ")} cm\n`;
-          }
-          // Now apply the image's absolute CTM
           s += `${node.cm.map(num).join(" ")} cm\n`;
         }
         s += `${nameTok(node.name)} Do\nQ\n`;
@@ -298,6 +274,10 @@ export function emitContentStreamFromFullIR(root) {
    ====================================================================== */
 function makeTextStream(page) {
   let body = "BT\n";
+  // Set text fill color to black to ensure text is visible
+  body += "0 g\n";
+  // Set text rendering mode to fill (default is 0, but being explicit)
+  body += "0 Tr\n";
   let lastSize = null;
   for (const t of page.textItems || []) {
     const s = t.str ?? "";
