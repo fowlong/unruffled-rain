@@ -35,41 +35,31 @@ function argsAry(a) {
   return Array.isArray(a) ? a : [a];
 }
 
-class ByteSink {
-  constructor() {
-    this.chunks = [];
-    this.len = 0;
-  }
-  length() {
-    return this.len;
-  }
-  writeString(s) {
-    const b = te.encode(s);
-    this.chunks.push(b);
-    this.len += b.length;
-  }
-  writeBytes(u8) {
-    const b = u8 instanceof Uint8Array ? u8 : new Uint8Array(u8);
-    this.chunks.push(b);
-    this.len += b.length;
-  }
-  toUint8Array() {
-    const out = new Uint8Array(this.len);
-    let o = 0;
-    for (const c of this.chunks) {
-      out.set(c, o);
-      o += c.length;
-    }
-    return out;
-  }
+/* ===== matrix helpers (2D affine 6-tuple) ===== */
+function mul6(a, b) {
+  // [a b c d e f] × [A B C D E F]
+  return [
+    a[0] * b[0] + a[2] * b[1],
+    a[1] * b[0] + a[3] * b[1],
+    a[0] * b[2] + a[2] * b[3],
+    a[1] * b[2] + a[3] * b[3],
+    a[0] * b[4] + a[2] * b[5] + a[4],
+    a[1] * b[4] + a[3] * b[5] + a[5],
+  ];
 }
-function writeObj(sink, id, bodyBytes) {
-  sink.writeBytes(te.encode(`${id} 0 obj\n`));
-  sink.writeBytes(bodyBytes);
-  sink.writeBytes(te.encode("\nendobj\n"));
-}
-function writePlainDictObj(sink, id, dictStr) {
-  writeObj(sink, id, te.encode(dictStr));
+function inv6(m) {
+  const [a, b, c, d, e, f] = m;
+  const det = a * d - b * c;
+  if (!det) return [1, 0, 0, 1, 0, 0];
+  const idet = 1 / det;
+  return [
+    d * idet,
+    -b * idet,
+    -c * idet,
+    a * idet,
+    (c * f - d * e) * idet,
+    (b * e - a * f) * idet,
+  ];
 }
 
 /* ===== glyph → string coercion ===== */
@@ -97,10 +87,13 @@ function strFrom(x) {
 }
 
 /* ======================================================================
-   Full IR → content stream BODY (string)  — now honors path styles
+   Full IR → content stream BODY (string)
+   - now tracks CTM and applies images with RELATIVE cm:
+     q (inv(CTM) * imageAbsCM) cm /Name Do Q
    ====================================================================== */
 export function emitContentStreamFromFullIR(root) {
   let s = "";
+
   const tok = {
     transform: "cm",
     setDash: "d",
@@ -142,47 +135,20 @@ export function emitContentStreamFromFullIR(root) {
     showSpacedText: "TJ",
   };
 
-  // Track CTM to handle images with absolute positioning
-  let ctm = [1, 0, 0, 1, 0, 0];
+  // Track CTM so we can emit images using relative matrices
+  let CTM = [1, 0, 0, 1, 0, 0];
   const ctmStack = [];
-  
-  function mulCTM(a, b) {
-    return [
-      a[0] * b[0] + a[2] * b[1],
-      a[1] * b[0] + a[3] * b[1],
-      a[0] * b[2] + a[2] * b[3],
-      a[1] * b[2] + a[3] * b[3],
-      a[0] * b[4] + a[2] * b[5] + a[4],
-      a[1] * b[4] + a[3] * b[5] + a[5],
-    ];
-  }
-  
-  function inverseCTM(m) {
-    const [a, b, c, d, e, f] = m;
-    const det = a * d - b * c;
-    if (Math.abs(det) < 1e-10) {
-      // Singular matrix, return identity
-      return [1, 0, 0, 1, 0, 0];
-    }
-    return [
-      d / det,
-      -b / det,
-      -c / det,
-      a / det,
-      (c * f - d * e) / det,
-      (b * e - a * f) / det,
-    ];
-  }
 
   function emitNode(node) {
     switch (node.type) {
-      case "save":
+      case "save": {
         s += "q\n";
-        ctmStack.push(ctm.slice());
+        ctmStack.push(CTM.slice());
         (node.children || []).forEach(emitNode);
-        ctm = ctmStack.pop() || [1, 0, 0, 1, 0, 0];
+        CTM = ctmStack.pop() || [1, 0, 0, 1, 0, 0];
         s += "Q\n";
         break;
+      }
 
       case "text": {
         s += "BT\n";
@@ -193,7 +159,6 @@ export function emitContentStreamFromFullIR(root) {
             s += `% unsupported text op ${ch.op}\n`;
             continue;
           }
-
           if (t === "Tj") {
             const a = argsAry(ch.args);
             const s0 = a.length ? strFrom(a[0]) : "";
@@ -217,75 +182,68 @@ export function emitContentStreamFromFullIR(root) {
         break;
       }
 
-      case "form":
-        s += `% form ${node.name || ""} begin\n`;
+      case "form": {
+        // non-drawing container in our IR; just recurse
         (node.children || []).forEach(emitNode);
-        s += `% form end\n`;
         break;
+      }
 
       case "image": {
-        // Images have absolute CTM stored. To prevent compounding with current CTM,
-        // we need to reset to identity first, then apply the image's absolute CTM.
+        const abs = Array.isArray(node.cm) && node.cm.length === 6 ? node.cm : [1,0,0,1,0,0];
+        // Relative to current CTM:
+        const rel = mul6(inv6(CTM), abs);
         s += "q\n";
-        if (node.cm && Array.isArray(node.cm) && node.cm.length === 6) {
-          // Apply inverse of current CTM to reset to identity
-          const inv = inverseCTM(ctm);
-          if (inv[0] !== 1 || inv[1] !== 0 || inv[2] !== 0 || inv[3] !== 1 || inv[4] !== 0 || inv[5] !== 0) {
-            s += `${inv.map(num).join(" ")} cm\n`;
-          }
-          // Now apply the image's absolute CTM
-          s += `${node.cm.map(num).join(" ")} cm\n`;
-        }
-        s += `${nameTok(node.name)} Do\nQ\n`;
+        s += `${rel.map(num).join(" ")} cm\n`;
+        s += `${nameTok(node.name)} Do\n`;
+        s += "Q\n";
         break;
       }
 
       case "svgPath":
       case "path": {
-        // styles
-        if (node.transform && node.transform.length === 6)
+        // optional local transform
+        if (node.transform && node.transform.length === 6) {
+          CTM = mul6(CTM, node.transform);
           s += `${node.transform.map(num).join(" ")} cm\n`;
-        if (Array.isArray(node.strokeColor))
-          s += `${node.strokeColor.map(num).join(" ")} RG\n`;
-        if (Array.isArray(node.fillColor))
-          s += `${node.fillColor.map(num).join(" ")} rg\n`;
+        }
+        if (Array.isArray(node.strokeColor)) s += `${node.strokeColor.map(num).join(" ")} RG\n`;
+        if (Array.isArray(node.fillColor))   s += `${node.fillColor.map(num).join(" ")} rg\n`;
         if (node.lineWidth != null) s += `${num(node.lineWidth)} w\n`;
-        if (node.lineCap != null) s += `${num(node.lineCap)} J\n`;
-        if (node.lineJoin != null) s += `${num(node.lineJoin)} j\n`;
+        if (node.lineCap != null)   s += `${num(node.lineCap)} J\n`;
+        if (node.lineJoin != null)  s += `${num(node.lineJoin)} j\n`;
         if (node.miterLimit != null) s += `${num(node.miterLimit)} M\n`;
         if (node.dash && Array.isArray(node.dash.array)) {
           const arrStr = `[ ${node.dash.array.map(num).join(" ")} ]`;
           const phase = num(node.dash.phase || 0);
           s += `${arrStr} ${phase} d\n`;
         }
-
         for (const seg of node.segments || []) {
           const [op, ...a] = seg;
           s += `${a.map(num).join(" ")} ${op}\n`;
         }
-        if (node.fill && node.stroke) s += node.evenOdd ? "B*\n" : "B\n";
-        else if (node.fill) s += node.evenOdd ? "f*\n" : "f\n";
-        else if (node.stroke) s += "S\n";
-        else s += "n\n";
+        if (node.fill && node.stroke) s += (node.evenOdd ? "B*\n" : "B\n");
+        else if (node.fill)           s += (node.evenOdd ? "f*\n" : "f\n");
+        else if (node.stroke)         s += "S\n";
+        else                          s += "n\n";
         break;
       }
 
       case "op": {
-        const t = tok[node.op];
-        if (!t) {
-          s += `% unsupported op ${node.op}\n`;
-          break;
-        }
-        s += `${argsAry(node.args).map(renderArg).join(" ")} ${t}\n`;
-        // Track CTM updates for transform operators
-        if (node.op === "transform" && Array.isArray(node.args) && node.args.length === 6) {
-          ctm = mulCTM(ctm, node.args);
+        if (node.op === "transform") {
+          const a = argsAry(node.args);
+          const m = a.length === 6 ? a : [1,0,0,1,0,0];
+          CTM = mul6(CTM, m);
+          s += `${m.map(num).join(" ")} cm\n`;
+        } else {
+          const t = tok[node.op];
+          if (!t) { s += `% unsupported op ${node.op}\n`; break; }
+          s += `${argsAry(node.args).map(renderArg).join(" ")} ${t}\n`;
         }
         break;
       }
 
       default:
-        s += `% unknown node ${node.type}\n`;
+        (node.children || []).forEach(emitNode);
     }
   }
 
@@ -366,8 +324,7 @@ function buildXObjectsFromAssets(assets, startId = 3) {
   for (const [name, spec] of Object.entries(assets || {})) {
     if (!spec?.dataUrl) continue;
     const { mime, bytes } = dataUrlToBytes(spec.dataUrl);
-    // Use case-insensitive comparison for MIME type
-    if (mime.toLowerCase() !== "image/jpeg") continue; // demo: JPEG only
+    if (mime !== "image/jpeg") continue; // demo: JPEG only
     let W = spec.width,
       H = spec.height;
     if (!W || !H) {
@@ -629,6 +586,46 @@ function buildXrefStream(doc, headerVersion) {
   writeObj(sink, xrefId, buf);
   sink.writeString(`startxref\n${xrefOffset}\n%%EOF\n`);
   return sink.toUint8Array();
+}
+
+/* ======================================================================
+   Sink + helpers
+   ====================================================================== */
+class ByteSink {
+  constructor() {
+    this.chunks = [];
+    this.len = 0;
+  }
+  length() {
+    return this.len;
+  }
+  writeString(s) {
+    const b = te.encode(s);
+    this.chunks.push(b);
+    this.len += b.length;
+  }
+  writeBytes(u8) {
+    const b = u8 instanceof Uint8Array ? u8 : new Uint8Array(u8);
+    this.chunks.push(b);
+    this.len += b.length;
+  }
+  toUint8Array() {
+    const out = new Uint8Array(this.len);
+    let o = 0;
+    for (const c of this.chunks) {
+      out.set(c, o);
+      o += c.length;
+    }
+    return out;
+  }
+}
+function writeObj(sink, id, bodyBytes) {
+  sink.writeBytes(te.encode(`${id} 0 obj\n`));
+  sink.writeBytes(bodyBytes);
+  sink.writeBytes(te.encode("\nendobj\n"));
+}
+function writePlainDictObj(sink, id, dictStr) {
+  writeObj(sink, id, te.encode(dictStr));
 }
 
 /* ======================================================================
