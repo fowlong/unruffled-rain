@@ -293,12 +293,7 @@ async function ensureImageAssetsForPage(page, fullIR, scale = HARVEST_SCALE) {
     sub.height = sh;
     const sctx = sub.getContext("2d");
 
-    // pdf.js renders images correctly oriented (it handles the CTM flip internally).
-    // But when we export to PDF, we'll use the original CTM which typically has negative d.
-    // So we need to flip the harvested image vertically so that the PDF's CTM will flip it back.
-    // We translate to (0, height) before flipping so the image stays within canvas bounds.
-    sctx.translate(0, sh);
-    sctx.scale(1, -1);
+    // Harvest the image as pdf.js renders it (correctly oriented)
     sctx.drawImage(c, sx, sy, sw, sh, 0, 0, sw, sh);
 
     try {
