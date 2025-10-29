@@ -294,8 +294,11 @@ async function ensureImageAssetsForPage(page, fullIR, scale = HARVEST_SCALE) {
     const sctx = sub.getContext("2d");
 
     // pdf.js renders images correctly oriented (it handles the CTM flip internally).
-    // We harvest the image as-is since pdf.js already applied the transformations.
-    // When we export to PDF, we'll use the original CTM which will orient it correctly.
+    // But when we export to PDF, we'll use the original CTM which typically has negative d.
+    // So we need to flip the harvested image vertically so that the PDF's CTM will flip it back.
+    // We translate to (0, height) before flipping so the image stays within canvas bounds.
+    sctx.translate(0, sh);
+    sctx.scale(1, -1);
     sctx.drawImage(c, sx, sy, sw, sh, 0, 0, sw, sh);
 
     try {
@@ -623,6 +626,20 @@ async function buildFullIRForPage(page) {
       case OPS.setFillGray:
         flushPath();
         gs.fillColor = [args[0], args[0], args[0]];
+        if (curPath) curPath.fillColor = [...gs.fillColor];
+        stack.at(-1).children.push({ type: "op", op, args });
+        break;
+      case OPS.setStrokeCMYKColor:
+        flushPath();
+        // Store CMYK as-is for paths, and add to IR for text
+        gs.strokeColor = [args[0], args[1], args[2], args[3]];
+        if (curPath) curPath.strokeColor = [...gs.strokeColor];
+        stack.at(-1).children.push({ type: "op", op, args });
+        break;
+      case OPS.setFillCMYKColor:
+        flushPath();
+        // Store CMYK as-is for paths, and add to IR for text
+        gs.fillColor = [args[0], args[1], args[2], args[3]];
         if (curPath) curPath.fillColor = [...gs.fillColor];
         stack.at(-1).children.push({ type: "op", op, args });
         break;
