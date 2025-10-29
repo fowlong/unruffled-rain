@@ -88,7 +88,8 @@ export function renderIRToCanvas({
     function drawText(str) {
       if (!str) return;
       const old = ctx.getTransform();
-      // Canvas text is y-up; flip to baseline-friendly space.
+      // Canvas text pixels are top-down; our page space is y-up.
+      // Flip locally so glyphs are upright but positions remain correct.
       ctx.save();
       ctx.scale(1, -1);
       if (currentFill) ctx.fillStyle = currentFill;
@@ -113,7 +114,6 @@ export function renderIRToCanvas({
           break;
         }
         case "setFont": {
-          // args: [name, size]
           const sz =
             Array.isArray(child.args) && typeof child.args[1] === "number"
               ? child.args[1]
@@ -136,16 +136,13 @@ export function renderIRToCanvas({
           break;
         }
         case "showSpacedText": {
-          // args: [ [ string | number (kerning) , ... ] ]
           const arr = Array.isArray(child.args?.[0]) ? child.args[0] : [];
-          // We ignore the numeric kerning adjustments for preview.
           const text = arr
             .map((x) => (typeof x === "number" ? "" : String(x)))
             .join("");
           drawText(text);
           break;
         }
-        // ignore other text-state ops for preview
         default:
           break;
       }
@@ -166,7 +163,6 @@ export function renderIRToCanvas({
           const a = n.args || [1, 0, 0, 1, 0, 0];
           applyCm(a[0], a[1], a[2], a[3], a[4], a[5]);
         }
-        // clip & setGState etc. are ignored in preview
         break;
 
       case "text":
@@ -179,8 +175,7 @@ export function renderIRToCanvas({
         break;
 
       case "image": {
-        // Use absolute CTM recorded on the node to avoid double-applying
-        // any transforms we already replayed from siblings.
+        // Absolute CTM recorded on node.
         const prev = ctx.getTransform();
         setToPageBase();
         if (n.cm && n.cm.length === 6)
@@ -188,11 +183,12 @@ export function renderIRToCanvas({
 
         const im = assets?.[n.name];
         if (im && im._img) {
-          // Paint image in 1x1 coords scaled by CTM.
-          // The harvested image is stored flipped to compensate for PDF's typical negative-d CTM.
-          ctx.drawImage(im._img, 0, 0, 1, 1);
+          // Image pixels are top-down; flip locally in unit square.
+          ctx.save();
+          ctx.scale(1, -1);
+          ctx.drawImage(im._img, 0, -1, 1, 1);
+          ctx.restore();
         } else {
-          // placeholder rectangle so you can see where the image would be
           ctx.fillStyle = "#ddd";
           ctx.fillRect(0, 0, 1, 1);
           ctx.strokeStyle = "#999";
